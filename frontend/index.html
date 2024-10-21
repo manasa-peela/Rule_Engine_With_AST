@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rule Evaluation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .rule-container {
+            margin-bottom: 10px;
+        }
+        #responseContainer {
+            margin-top: 20px;
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+    <script>
+        function addRule() {
+            const rulesContainer = document.getElementById('rulesContainer');
+            const ruleHtml = `<div class="rule-container">
+                                <input type="text" placeholder="Enter your rule" required>
+                                <button type="button" onclick="removeRule(this)">Remove</button>
+                              </div>`;
+            rulesContainer.insertAdjacentHTML('beforeend', ruleHtml);
+        }
+
+        function removeRule(button) {
+            const ruleContainer = button.parentElement;
+            ruleContainer.remove();
+        }
+
+        async function createRules(event) {
+            event.preventDefault();
+            const rules = [];
+            const fields = document.querySelectorAll('#rulesContainer input');
+
+            fields.forEach(field => {
+                rules.push(field.value);
+            });
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/create_rule', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ rules }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log('Rules Created:', result);
+
+                if (!result.ast) {
+                    throw new Error('AST is null or undefined');
+                }
+
+                document.getElementById('responseContainer').innerText = 'Rules Created succesfully';
+                
+                generateInputFields(result.ast);
+                window.ast = result.ast;
+            } catch (error) {
+                console.error('Error creating rules:', error);
+                document.getElementById('responseContainer').innerText = 'Error creating rules: ' + error.message;
+                document.getElementById('responseContainer').classList.add('error');
+            }
+        }
+
+        function generateInputFields(ast) {
+            const fieldsContainer = document.getElementById('dynamicFields');
+            fieldsContainer.innerHTML = '';
+
+            const fields = new Set();
+
+            function extractFields(node) {
+                if (node.node_type === 'operand') {
+                    const value = node.value;
+                    const operator = value.split(' ')[1];
+
+                    const rightValue = value.split(' ')[2];
+
+                    if (operator === '>' || operator === '<' || operator === '==' || operator === '=') {
+                        const fieldName = value.split(' ')[0];
+                        const isNumber = !isNaN(rightValue) || rightValue === '0';
+                        const inputType = isNumber ? 'number' : 'text';
+                        fields.add({ name: fieldName, type: inputType });
+                    }
+                } else if (node.node_type === 'operator') {
+                    extractFields(node.left);
+                    extractFields(node.right);
+                }
+            }
+
+            extractFields(ast);
+
+            fields.forEach(field => {
+                const fieldHtml = `<label for="${field.name}">${field.name.charAt(0).toUpperCase() + field.name.slice(1)}:</label>
+                                   <input type="${field.type}" id="${field.name}" required>`;
+                fieldsContainer.innerHTML += fieldHtml;
+            });
+        }
+
+        async function evaluateRule(event) {
+            event.preventDefault();
+            const userData = {};
+
+            const fields = document.querySelectorAll('#dynamicFields input');
+            fields.forEach(field => {
+                if (field.type === "number") {
+                    userData[field.id] = parseFloat(field.value);
+                } else {
+                    userData[field.id] = field.value;
+                }
+            });
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/evaluate_rule', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        ast: window.ast,
+                        data: userData
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log('Evaluation Result:', result);
+                document.getElementById('responseContainer').innerText = 'Evaluation Result: ' + result.result;
+                document.getElementById('responseContainer').classList.remove('error');
+            } catch (error) {
+                console.error('Error evaluating rule:', error);
+                document.getElementById('responseContainer').innerText = 'Error evaluating rule: ' + error.message;
+                document.getElementById('responseContainer').classList.add('error');
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Rule Evaluation App</h1>
+    
+    <h2>Create Rules</h2>
+    <form id="createRuleForm" onsubmit="createRules(event)">
+        <div id="rulesContainer">
+            <div class="rule-container">
+                <input type="text" placeholder="Enter your rule" required>
+                <button type="button" onclick="removeRule(this)">Remove</button>
+            </div>
+        </div>
+        <button type="button" onclick="addRule()">Add Rule</button>
+        <button type="submit">Create Rules</button>
+    </form>
+
+    <h2>Dynamic User Input</h2>
+    <div id="dynamicFields"></div>
+
+    <h2>Evaluate Rule</h2>
+    <form id="evaluateRuleForm" onsubmit="evaluateRule(event)">
+        <button type="submit">Evaluate Rule</button>
+    </form>
+
+    <div id="responseContainer"></div>
+</body>
+</html>
